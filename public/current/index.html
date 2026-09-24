@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YouTube Transcript Fetcher</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -215,37 +215,53 @@
       const transcript = result.value.trim();
       if (!transcript) return;
 
-      if (!window.jspdf || !window.jspdf.jsPDF) {
+      if (typeof html2pdf !== 'function') {
         status.className = 'status error';
         status.textContent = 'The PDF library could not be loaded.';
         return;
       }
 
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 15;
-      const lineHeight = 6;
-      const maxLineWidth = pageWidth - (margin * 2);
-      let y = margin;
+      const tempDiv = document.createElement('div');
+      const escapedTranscript = transcript
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-
-      transcript.split('\n').forEach((line) => {
-        const wrappedLines = pdf.splitTextToSize(line, maxLineWidth);
-        wrappedLines.forEach((wrappedLine) => {
-          if (y + lineHeight > pageHeight - margin) {
-            pdf.addPage();
-            y = margin;
-          }
-          pdf.text(wrappedLine, margin, y);
-          y += lineHeight;
-        });
+      tempDiv.innerHTML = escapedTranscript.replace(/\n/g, '<br>');
+      Object.assign(tempDiv.style, {
+        padding: '20px',
+        fontFamily: 'sans-serif',
+        lineHeight: '1.6',
+        color: '#000',
+        backgroundColor: '#fff',
+        whiteSpace: 'normal',
+        overflowWrap: 'anywhere',
+        width: '100%'
       });
 
-      pdf.save('youtube-transcript.pdf');
+      document.body.appendChild(tempDiv);
+
+      const opt = {
+        margin: 15,
+        filename: 'youtube-transcript.pdf',
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      html2pdf()
+        .set(opt)
+        .from(tempDiv)
+        .save()
+        .then(() => {
+          tempDiv.remove();
+        })
+        .catch((error) => {
+          tempDiv.remove();
+          status.className = 'status error';
+          status.textContent = `Unable to create PDF: ${error.message}`;
+        });
     });
   </script>
 </body>
