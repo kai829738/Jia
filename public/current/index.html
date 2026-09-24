@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YouTube Transcript Fetcher</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -78,12 +77,21 @@
     button:hover { background: var(--primary-dark); }
     button:disabled { cursor: wait; opacity: 0.7; }
 
-    #download-pdf-button {
-      background-color: #10b981;
+    .download-buttons {
+      display: flex;
+      gap: 10px;
       margin-top: 10px;
     }
 
+    .download-buttons button {
+      flex: 1;
+      margin-top: 0;
+    }
+
+    #download-pdf-button { background-color: #10b981; }
     #download-pdf-button:hover { background-color: #059669; }
+    #download-txt-button { background-color: #6366f1; }
+    #download-txt-button:hover { background-color: #4f46e5; }
 
     .result-label { margin-top: 26px; }
     textarea {
@@ -97,6 +105,10 @@
 
     .status { min-height: 1.25em; margin-top: 10px; color: var(--muted); }
     .status.error { color: var(--error); }
+
+    @media (max-width: 480px) {
+      .download-buttons { flex-direction: column; }
+    }
   </style>
 </head>
 <body>
@@ -137,13 +149,18 @@
     <div id="status" class="status" role="status" aria-live="polite"></div>
     <label class="result-label" for="result">Formatted Transcript</label>
     <textarea id="result" readonly placeholder="The formatted transcript will appear here."></textarea>
-    <button id="download-pdf-button" type="button" style="display: none; background-color: #10b981; margin-top: 10px;">Download PDF</button>
+    <div id="download-buttons" class="download-buttons" style="display: none;">
+      <button id="download-pdf-button" type="button">Download PDF</button>
+      <button id="download-txt-button" type="button">Download TXT</button>
+    </div>
   </main>
 
   <script>
     const form = document.getElementById('transcript-form');
     const button = document.getElementById('submit-button');
+    const downloadButtons = document.getElementById('download-buttons');
     const downloadPdfButton = document.getElementById('download-pdf-button');
+    const downloadTxtButton = document.getElementById('download-txt-button');
     const status = document.getElementById('status');
     const result = document.getElementById('result');
 
@@ -157,8 +174,6 @@
     }
 
     function formatTranscript(data) {
-      // The API normally returns the transcript array directly. The fallback
-      // also supports APIs that wrap it in a `data` or `transcript` property.
       const transcript = Array.isArray(data)
         ? data
         : data && Array.isArray(data.data)
@@ -179,7 +194,7 @@
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       button.disabled = true;
-      downloadPdfButton.style.display = 'none';
+      downloadButtons.style.display = 'none';
       status.className = 'status';
       status.textContent = 'Loading transcript...';
       result.value = '';
@@ -200,7 +215,7 @@
         }
 
         result.value = formatTranscript(data);
-        downloadPdfButton.style.display = 'block';
+        downloadButtons.style.display = 'flex';
         status.textContent = 'Transcript loaded.';
       } catch (error) {
         status.className = 'status error';
@@ -212,56 +227,47 @@
     });
 
     downloadPdfButton.addEventListener('click', () => {
-      const transcript = result.value.trim();
-      if (!transcript) return;
+      const formattedTranscriptString = result.value.trim();
+      if (!formattedTranscriptString) return;
 
-      if (typeof html2pdf !== 'function') {
+      const printWin = window.open('', '_blank');
+      if (!printWin) {
         status.className = 'status error';
-        status.textContent = 'The PDF library could not be loaded.';
+        status.textContent = 'Please allow pop-ups to print the transcript.';
         return;
       }
 
-      const tempDiv = document.createElement('div');
-      const escapedTranscript = transcript
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+      printWin.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>YouTube Transcript</title>
+  <style>
+    body { font-family: sans-serif; white-space: pre-wrap; line-height: 1.6; padding: 20px; color: black; }
+  </style>
+</head>
+<body></body>
+</html>`);
+      printWin.document.close();
+      // textContent preserves Unicode safely without interpreting transcript text as HTML.
+      printWin.document.body.textContent = formattedTranscriptString;
+      printWin.focus();
+      printWin.print();
+    });
 
-      tempDiv.innerHTML = escapedTranscript.replace(/\n/g, '<br>');
-      Object.assign(tempDiv.style, {
-        padding: '20px',
-        fontFamily: 'sans-serif',
-        lineHeight: '1.6',
-        color: '#000',
-        backgroundColor: '#fff',
-        whiteSpace: 'normal',
-        overflowWrap: 'anywhere',
-        width: '100%'
-      });
+    downloadTxtButton.addEventListener('click', () => {
+      const formattedTranscriptString = result.value.trim();
+      if (!formattedTranscriptString) return;
 
-      document.body.appendChild(tempDiv);
-
-      const opt = {
-        margin: 15,
-        filename: 'youtube-transcript.pdf',
-        html2canvas: { scale: 2 },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-
-      html2pdf()
-        .set(opt)
-        .from(tempDiv)
-        .save()
-        .then(() => {
-          tempDiv.remove();
-        })
-        .catch((error) => {
-          tempDiv.remove();
-          status.className = 'status error';
-          status.textContent = `Unable to create PDF: ${error.message}`;
-        });
+      const blob = new Blob([formattedTranscriptString], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'youtube-transcript.txt';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     });
   </script>
 </body>
