@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YouTube Transcript Fetcher</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -77,6 +78,13 @@
     button:hover { background: var(--primary-dark); }
     button:disabled { cursor: wait; opacity: 0.7; }
 
+    #download-pdf-button {
+      background-color: #10b981;
+      margin-top: 10px;
+    }
+
+    #download-pdf-button:hover { background-color: #059669; }
+
     .result-label { margin-top: 26px; }
     textarea {
       min-height: 220px;
@@ -127,19 +135,51 @@
     </form>
 
     <div id="status" class="status" role="status" aria-live="polite"></div>
-    <label class="result-label" for="result">Response</label>
-    <textarea id="result" readonly placeholder="The transcript response will appear here."></textarea>
+    <label class="result-label" for="result">Formatted Transcript</label>
+    <textarea id="result" readonly placeholder="The formatted transcript will appear here."></textarea>
+    <button id="download-pdf-button" type="button" style="display: none; background-color: #10b981; margin-top: 10px;">Download PDF</button>
   </main>
 
   <script>
     const form = document.getElementById('transcript-form');
     const button = document.getElementById('submit-button');
+    const downloadPdfButton = document.getElementById('download-pdf-button');
     const status = document.getElementById('status');
     const result = document.getElementById('result');
+
+    function formatTimestamp(seconds) {
+      const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const remainingSeconds = totalSeconds % 60;
+
+      return `[${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}]`;
+    }
+
+    function formatTranscript(data) {
+      // The API normally returns the transcript array directly. The fallback
+      // also supports APIs that wrap it in a `data` or `transcript` property.
+      const transcript = Array.isArray(data)
+        ? data
+        : data && Array.isArray(data.data)
+          ? data.data
+          : data && Array.isArray(data.transcript)
+            ? data.transcript
+            : null;
+
+      if (!transcript) {
+        throw new Error('The API response did not contain a transcript array.');
+      }
+
+      return transcript
+        .map((item) => `${formatTimestamp(item.start)} ${item.text || ''}`.trimEnd())
+        .join('\n');
+    }
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       button.disabled = true;
+      downloadPdfButton.style.display = 'none';
       status.className = 'status';
       status.textContent = 'Loading transcript...';
       result.value = '';
@@ -159,7 +199,8 @@
           throw new Error(data.error || 'The request failed.');
         }
 
-        result.value = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        result.value = formatTranscript(data);
+        downloadPdfButton.style.display = 'block';
         status.textContent = 'Transcript loaded.';
       } catch (error) {
         status.className = 'status error';
@@ -168,6 +209,43 @@
       } finally {
         button.disabled = false;
       }
+    });
+
+    downloadPdfButton.addEventListener('click', () => {
+      const transcript = result.value.trim();
+      if (!transcript) return;
+
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        status.className = 'status error';
+        status.textContent = 'The PDF library could not be loaded.';
+        return;
+      }
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 15;
+      const lineHeight = 6;
+      const maxLineWidth = pageWidth - (margin * 2);
+      let y = margin;
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+
+      transcript.split('\n').forEach((line) => {
+        const wrappedLines = pdf.splitTextToSize(line, maxLineWidth);
+        wrappedLines.forEach((wrappedLine) => {
+          if (y + lineHeight > pageHeight - margin) {
+            pdf.addPage();
+            y = margin;
+          }
+          pdf.text(wrappedLine, margin, y);
+          y += lineHeight;
+        });
+      });
+
+      pdf.save('youtube-transcript.pdf');
     });
   </script>
 </body>
